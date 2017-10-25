@@ -117,6 +117,33 @@ def perspect_transform(img, src, dst):
 
     return warped, mask
 
+def stbd_frame(image):
+    # this function takes a middle frame snip of the threshold image.
+    # this function splits the threshold image by 2 and returns the true values (navigable terrain)
+
+    snip = np.zeros_like(image[:, :])
+
+    length = image.shape[1]
+    mid = length/2
+    mid = int(mid)
+
+    snip[:, mid:length + 1] = image[:, mid:length + 1]
+
+    return snip
+
+def port_frame(image):
+
+    snip = np.zeros_like(image[:, :])
+
+    length = image.shape[1]
+    mid = length / 2
+    mid = int(mid)
+
+    snip[:, 0:mid + 1] = image[:, 0:mid + 1]
+
+    return snip
+
+
 
 # Apply the above functions in succession and update the Rover state accordingly
 def perception_step(Rover):
@@ -140,18 +167,44 @@ def perception_step(Rover):
 
     nav_terrain = color_thresh_snip(threshed)
 
-    Rover.vision_image[:, :, 2] = threshed *255
-    Rover.vision_image[:, :, 0] = obs_map * 255
 
-    # convert map image pixel values to rover-centric coords
-    xpix, ypix = rover_coords(threshed)
-    xmap, ymap = rover_coords(nav_terrain)
+    #------------------------------------------------------------------------------------------------------#
 
-    # convert rover-centric pixel values to world coords
+    # initialize constants
+    theta_offset = 10
+
+    stbd = stbd_frame(threshed)
+    port = port_frame(threshed)
+
+    stbd_count = cv2.countNonZero(stbd)
+    port_count = cv2.countNonZero(port)
+
+    if stbd_count < port_count:
+        # the wall is on the stbd side
+        xpix, ypix = rover_coords(stbd)
+        dist, angles = to_polar_coords(xpix, ypix)
+
+    else:
+        # the wall is on the port side
+        xpix, ypix = rover_coords(port)
+        dist, angles = to_polar_coords(xpix, ypix)
+
+
+
     world_size = Rover.worldmap.shape[0]
     scale = 2 * dst_size
 
-    x_world, y_world = pix_to_world(xpix, ypix, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
+    Rover.vision_image[:, :, 2] = threshed *255 # blue channel
+    Rover.vision_image[:, :, 0] = obs_map * 255 # red channel
+
+    # convert map image pixel values to rover-centric coords
+    #xpix, ypix = rover_coords(threshed)
+    xmap, ymap = rover_coords(nav_terrain)
+
+    # convert rover-centric pixel values to world coords
+
+
+    #x_world, y_world = pix_to_world(xpix, ypix, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
 
     x_map_world, y_map_world = pix_to_world(xmap, ymap, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
 
@@ -159,12 +212,13 @@ def perception_step(Rover):
     obs_x_world, obs_y_world = pix_to_world(obsxpix, obsypix, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
 
     # update the world map
-    Rover.worldmap[y_map_world, x_map_world, 2] += 10
-    Rover.worldmap[obs_y_world, obs_x_world, 0] += 1
+    Rover.worldmap[y_map_world, x_map_world, 2] += 10   # green channel
+    Rover.worldmap[obs_y_world, obs_x_world, 0] += 1    # red channel
 
-    dist, angles = to_polar_coords(xpix, ypix)
+    #dist, angles = to_polar_coords(xpix, ypix)
 
     Rover.nav_angles = angles
+
 
     # find rocks in the image
     rock_map = find_rocks(warped, levels=(110, 110, 50))
