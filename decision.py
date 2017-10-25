@@ -24,6 +24,7 @@ def decision_step(Rover):
                 else: # Else coast
                     Rover.throttle = 0
                 Rover.brake = 0
+
                 # Set steering to average angle clipped to the range +/- 15
                 Rover.steer = np.clip(np.mean(Rover.nav_angles * 180/np.pi), -15, 15)
             # If there's a lack of navigable terrain pixels then go to 'stop' mode
@@ -72,4 +73,8 @@ def decision_step(Rover):
         Rover.send_pickup = True
     
     return Rover
+
+
+
+
 
