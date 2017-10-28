@@ -19,15 +19,16 @@ def color_thresh(img, rgb_thresh=(160, 160, 160)):
     # Return the binary image
     return color_select
 
+
 def color_thresh_snip(color_select):
-    # this fucntion is used to create a snip of the color_thresh function output.
+    # this function is used to create a snip of the color_thresh function output.
     # the purpose is to have a smaller mapped area closer to the rover recorded onto the truth map
     select_snip = np.zeros_like(color_select[:, :])
 
     # initialize constants for the frame of the picture to be clipped
     view = 50  # pixels in the x direction to keep measured from centerline of image
     bottom_offset = 6
-    # intilize ranges of the picture size to trim
+    # initialize ranges of the picture size to trim
     top_range = color_select.shape[0] - view - bottom_offset
     bottom_range = color_select.shape[0] - bottom_offset
 
@@ -42,6 +43,7 @@ def color_thresh_snip(color_select):
 
     return select_snip
 
+
 # similar function as color_thresh with different RGB values to find the yellow rocks
 def find_rocks(img, levels=(110, 110, 50)):
     # Create an array of zeros same xy size as img, but single channel
@@ -49,7 +51,7 @@ def find_rocks(img, levels=(110, 110, 50)):
 
     rockpix = (img[:,:,0] > levels[0]) \
                 & (img[:,:,1] > levels[1]) \
-                & (img[:,:,2] > levels[2])
+                & (img[:,:,2] < levels[2])
     # Index the array of zeros with the boolean array and set to 1
     color_select[rockpix] = 1
     # Return the binary image
@@ -117,9 +119,10 @@ def perspect_transform(img, src, dst):
 
     return warped, mask
 
+
 def stbd_frame(image):
-    # this function takes a middle frame snip of the threshold image.
-    # this function splits the threshold image by 2 and returns the true values (navigable terrain)
+    # this function splits the threshold image by 2
+    # returns the right side of the image
 
     snip = np.zeros_like(image[:, :])
 
@@ -131,7 +134,10 @@ def stbd_frame(image):
 
     return snip
 
+
 def port_frame(image):
+    # this function splits the threshold image by 2
+    # returns the left side of the image
 
     snip = np.zeros_like(image[:, :])
 
@@ -170,15 +176,16 @@ def perception_step(Rover):
 
     #------------------------------------------------------------------------------------------------------#
 
-    # initialize constants
-    theta_offset = 10
-
+    # initialize the starboard and port images
     stbd = stbd_frame(threshed)
     port = port_frame(threshed)
 
+    # count the number of true pixels in each image
     stbd_count = cv2.countNonZero(stbd)
     port_count = cv2.countNonZero(port)
 
+    # compare the pixel counts to determine where location of the wall
+    # calculate the angles of the pixels, used for steering the rover
     if stbd_count < port_count:
         # the wall is on the stbd side
         xpix, ypix = rover_coords(stbd)
@@ -188,7 +195,6 @@ def perception_step(Rover):
         # the wall is on the port side
         xpix, ypix = rover_coords(port)
         dist, angles = to_polar_coords(xpix, ypix)
-
 
 
     world_size = Rover.worldmap.shape[0]
