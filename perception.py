@@ -1,5 +1,7 @@
 import numpy as np
 import cv2
+import math
+import matplotlib.pyplot as plt
 
 # Identify pixels above the threshold
 # Threshold of RGB > 160 does a nice job of identifying ground pixels only
@@ -17,6 +19,31 @@ def color_thresh(img, rgb_thresh=(160, 160, 160)):
     # Return the binary image
     return color_select
 
+
+def color_thresh_snip(color_select):
+    # this function is used to create a snip of the color_thresh function output.
+    # the purpose is to have a smaller mapped area closer to the rover recorded onto the truth map
+    select_snip = np.zeros_like(color_select[:, :])
+
+    # initialize constants for the frame of the picture to be clipped
+    view = 50  # pixels in the x direction to keep measured from centerline of image
+    bottom_offset = 6
+    # initialize ranges of the picture size to trim
+    top_range = color_select.shape[0] - view - bottom_offset
+    bottom_range = color_select.shape[0] - bottom_offset
+
+    left_range = color_select.shape[1]/2 - view
+    left_range = int(left_range)
+
+    right_range = color_select.shape[1]/2 + view
+    right_range = int(right_range)
+
+    select_snip[top_range:bottom_range + 1, left_range:right_range + 1] = \
+        color_select[top_range:bottom_range + 1, left_range:right_range + 1]
+
+    return select_snip
+
+
 # similar function as color_thresh with different RGB values to find the yellow rocks
 def find_rocks(img, levels=(110, 110, 50)):
     # Create an array of zeros same xy size as img, but single channel
@@ -24,7 +51,7 @@ def find_rocks(img, levels=(110, 110, 50)):
 
     rockpix = (img[:,:,0] > levels[0]) \
                 & (img[:,:,1] > levels[1]) \
-                & (img[:,:,2] > levels[2])
+                & (img[:,:,2] < levels[2])
     # Index the array of zeros with the boolean array and set to 1
     color_select[rockpix] = 1
     # Return the binary image
@@ -86,11 +113,42 @@ def pix_to_world(xpix, ypix, xpos, ypos, yaw, world_size, scale):
 def perspect_transform(img, src, dst):
            
     M = cv2.getPerspectiveTransform(src, dst)
-    warped = cv2.warpPerspective(img, M, (img.shape[1], img.shape[0]))# keep same size as input image
+    warped = cv2.warpPerspective(img, M, (img.shape[1], img.shape[0])) # keep same size as input image
 
     mask = cv2.warpPerspective(np.ones_like(img[:, :, 0]), M, (img.shape[1], img.shape[0]))
 
     return warped, mask
+
+
+def stbd_frame(image):
+    # this function splits the threshold image by 2
+    # returns the right side of the image
+
+    snip = np.zeros_like(image[:, :])
+
+    length = image.shape[1]
+    mid = length/2
+    mid = int(mid)
+
+    snip[:, mid:length + 1] = image[:, mid:length + 1]
+
+    return snip
+
+
+def port_frame(image):
+    # this function splits the threshold image by 2
+    # returns the left side of the image
+
+    snip = np.zeros_like(image[:, :])
+
+    length = image.shape[1]
+    mid = length / 2
+    mid = int(mid)
+
+    snip[:, 0:mid + 1] = image[:, 0:mid + 1]
+
+    return snip
+
 
 
 # Apply the above functions in succession and update the Rover state accordingly
@@ -113,28 +171,60 @@ def perception_step(Rover):
     threshed = color_thresh(warped)
     obs_map = np.absolute(np.float32(threshed) - 1) * mask
 
-    Rover.vision_image[:, :, 2] = threshed *255
-    Rover.vision_image[:, :, 0] = obs_map * 255
+    nav_terrain = color_thresh_snip(threshed)
 
-    # convert map image pixel values to rover-centric coords
-    xpix, ypix = rover_coords(threshed)
 
-    # convert rover-centric pixel values to world coords
+    #------------------------------------------------------------------------------------------------------#
+
+    # initialize the starboard and port images
+    stbd = stbd_frame(threshed)
+    port = port_frame(threshed)
+
+    # count the number of true pixels in each image
+    stbd_count = cv2.countNonZero(stbd)
+    port_count = cv2.countNonZero(port)
+
+    # compare the pixel counts to determine where location of the wall
+    # calculate the angles of the pixels, used for steering the rover
+    if stbd_count < port_count:
+        # the wall is on the stbd side
+        xpix, ypix = rover_coords(stbd)
+        dist, angles = to_polar_coords(xpix, ypix)
+
+    else:
+        # the wall is on the port side
+        xpix, ypix = rover_coords(port)
+        dist, angles = to_polar_coords(xpix, ypix)
+
+
     world_size = Rover.worldmap.shape[0]
     scale = 2 * dst_size
 
-    x_world, y_world = pix_to_world(xpix, ypix, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
+    Rover.vision_image[:, :, 2] = threshed *255 # blue channel
+    Rover.vision_image[:, :, 0] = obs_map * 255 # red channel
+
+    # convert map image pixel values to rover-centric coords
+    #xpix, ypix = rover_coords(threshed)
+    xmap, ymap = rover_coords(nav_terrain)
+
+    # convert rover-centric pixel values to world coords
+
+
+    #x_world, y_world = pix_to_world(xpix, ypix, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
+
+    x_map_world, y_map_world = pix_to_world(xmap, ymap, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
 
     obsxpix, obsypix = rover_coords(obs_map)
     obs_x_world, obs_y_world = pix_to_world(obsxpix, obsypix, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
 
-    # update the world map (right side of the screen)
-    Rover.worldmap[y_world, x_world, 2] += 10
-    Rover.worldmap[obs_y_world, obs_x_world, 0] += 1
+    # update the world map
+    Rover.worldmap[y_map_world, x_map_world, 2] += 10   # green channel
+    Rover.worldmap[obs_y_world, obs_x_world, 0] += 1    # red channel
 
-    dist, angles = to_polar_coords(xpix, ypix)
+    #dist, angles = to_polar_coords(xpix, ypix)
 
     Rover.nav_angles = angles
+
 
     # find rocks in the image
     rock_map = find_rocks(warped, levels=(110, 110, 50))
