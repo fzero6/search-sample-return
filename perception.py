@@ -167,63 +167,55 @@ def perception_step(Rover):
     # perform perspective transform
     warped, mask = perspect_transform(Rover.img, source, destination)
 
-    # color threshold
+    # color threshold of the warped image
     threshed = color_thresh(warped)
+    # generating the obstruction map as the absolute value of the inverse of the threshold image.
+    # multiplied by the mask to remove the "obstruction" pixels outside the frame of view of the camera
     obs_map = np.absolute(np.float32(threshed) - 1) * mask
 
+    # perform the snip on the obstructions map
+    # this results in a smaller map of pixels closest to the rover. The further out pixels added noise to results
+    obs_map = color_thresh_snip(obs_map)
+
+    # perform the snip on the navigable terrain pixels.
+    # this results in pixels far away from the image not being able to weight the pixel average when used later
+    # to determine the mean angle of navigable pixels.
     nav_terrain = color_thresh_snip(threshed)
 
+    # convert the navigable terrain to rover coordintes. set the x and y pixels to the variables xpix and ypix
+    xpix, ypix = rover_coords(nav_terrain)
 
-    #------------------------------------------------------------------------------------------------------#
-
-    # initialize the starboard and port images
-    stbd = stbd_frame(threshed)
-    port = port_frame(threshed)
-
-    # count the number of true pixels in each image
-    stbd_count = cv2.countNonZero(stbd)
-    port_count = cv2.countNonZero(port)
-
-    # compare the pixel counts to determine where location of the wall
-    # calculate the angles of the pixels, used for steering the rover
-    if stbd_count < port_count:
-        # the wall is on the stbd side
-        xpix, ypix = rover_coords(stbd)
-        dist, angles = to_polar_coords(xpix, ypix)
-
-    else:
-        # the wall is on the port side
-        xpix, ypix = rover_coords(port)
-        dist, angles = to_polar_coords(xpix, ypix)
-
+    # calculated the distance to each x,y pair of pixels from the rover camera
+    # calculate the angles of the navigable pixel locations
+    dist, angles = to_polar_coords(xpix, ypix)
 
     world_size = Rover.worldmap.shape[0]
     scale = 2 * dst_size
 
-    Rover.vision_image[:, :, 2] = threshed *255 # blue channel
+    # updated the vision image (rover data view) with navigable terrain in the blue channel and obstructions in the red
+    Rover.vision_image[:, :, 2] = nav_terrain *255 # blue channel, was threshed
     Rover.vision_image[:, :, 0] = obs_map * 255 # red channel
 
     # convert map image pixel values to rover-centric coords
-    #xpix, ypix = rover_coords(threshed)
     xmap, ymap = rover_coords(nav_terrain)
 
     # convert rover-centric pixel values to world coords
 
-
-    #x_world, y_world = pix_to_world(xpix, ypix, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
-
     x_map_world, y_map_world = pix_to_world(xmap, ymap, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
 
+    # convert the obstruction pixels to rover coordinates
     obsxpix, obsypix = rover_coords(obs_map)
+
+    # convert to world coordinates
     obs_x_world, obs_y_world = pix_to_world(obsxpix, obsypix, Rover.pos[0], Rover.pos[1], Rover.yaw, world_size, scale)
 
-    # update the world map
-    Rover.worldmap[y_map_world, x_map_world, 2] += 10   # green channel
+    # update the world map (map overlay) with nav pixels in the blue channel and obstructions in the red channel
+    Rover.worldmap[y_map_world, x_map_world, 2] += 10   # blue channel
     Rover.worldmap[obs_y_world, obs_x_world, 0] += 1    # red channel
 
-    #dist, angles = to_polar_coords(xpix, ypix)
-
+    # send the navigable pixel angles and distances to the Rover class
     Rover.nav_angles = angles
+    Rover.nav_dists = dist
 
 
     # find rocks in the image
@@ -234,7 +226,7 @@ def perception_step(Rover):
         rock_x_world, rock_y_world = pix_to_world(rock_x, rock_y, Rover.pos[0], Rover.pos[1],
                                                   Rover.yaw, world_size, scale)
 
-        rock_dist, rock_ang = to_polar_coords(rock_x, rock_y)
+        rock_dist, rock_angle = to_polar_coords(rock_x, rock_y)
         rock_idx = np.argmin(rock_dist)
         rock_xcen = rock_x_world[rock_idx]
         rock_ycen = rock_y_world[rock_idx]
@@ -242,13 +234,17 @@ def perception_step(Rover):
         Rover.worldmap[rock_ycen, rock_xcen, 1] = 255
         Rover.vision_image[:, :, 1] = rock_map * 255
 
+        Rover.rock_nav_angle = rock_angle
+        Rover.rock_nav_dist = rock_dist
+
     else:
         Rover.vision_image[:, :, 1] = 0
+        Rover.rock_nav_angle = 0
 
     # Perform perception steps to update Rover()
-    # TODO: 
+    # TODO:
     # NOTE: camesra image is coming to you in Rover.img
-    # 1) Define source and destination points for perpective transform
+    # 1) Define source and destination points for perspective transform
     # 2) Apply perspective transform
     # 3) Apply color threshold to identify navigable terrain/obstacles/rock samples
     # 4) Update Rover.vision_image (this will be displayed on left side of screen)
