@@ -8,40 +8,17 @@ def decision_step(Rover):
     # Here you're all set up with some basic functionality but you'll need to
     # improve on this decision tree to do a good job of navigating autonomously!
 
-    # Example:
-
     # offset angle for steering the rover.
     theta = 13
     # navigable pixel threshold for stopping.
     stop_thresh = 200
+
     # Check if we have vision data to make decisions with
     if Rover.nav_angles is not None:
         # Check for Rover.mode status
         if Rover.mode == 'forward':
             # Check the extent of navigable terrain
             # if the rover has navigable terrain, but it is not moving forward reverse the rover
-
-            if Rover.rock_nav_angle is not None:
-                    # navigate using the rock pixels instead of navigable pixels
-                    rock_angle = np.mean(Rover.rock_nav_angle)
-                    Rover.steer = np.clip(rock_angle, -15, 15)
-                    Rover.throttle = Rover.throttle_set / 2 # set throttle to 0.2
-                    Rover.debug = 'forward @ mean angle'
-
-                    if Rover.near_sample == 'near sample':
-                        Rover.throttle = 0
-                        Rover.brake = Rover.brake_set
-                        Rover.debug = 'near a sample'
-
-                        if Rover.vel == 0 and not Rover.picking_up:
-                            Rover.send_pickup = True
-                            Rover.rock_nav_angle = None
-                            Rover.rock_nav_dist = None
-
-            if len(Rover.nav_angles) >= Rover.stop_forward and Rover.vel == 0 and Rover.throttle > 0:
-                # if the rover is see nav terrain but not moving reverse the rover.
-                Rover.steer = -15
-                Rover.debug = 'rover stuck, nav angles + , throttle +'
 
             if len(Rover.nav_angles) >= Rover.stop_forward:
                 # If mode is forward, navigable terrain looks good
@@ -56,13 +33,17 @@ def decision_step(Rover):
                     Rover.throttle = Rover.throttle_set
                 else:  # Else coast
                     Rover.throttle = 0
-                    #Rover.steer = 15
+                    # Rover.steer = 15
                 Rover.brake = 0
 
+                # calculate the mean angle of the navigable pixels
                 mean_angle = np.mean(Rover.nav_angles * 180 / np.pi)
                 nav_angle = mean_angle
+                # steer the rover to the theta degree counter clockwise from the mean angle.
+                # clip the values between the -15 and 15 steering range.
+                # this forces the rover to corrective steer to the left enabling left wall follow.
                 Rover.steer = np.clip(nav_angle + theta, -15, 15)
-                # Rover.steer = np.clip(np.mean(Rover.nav_angles * 180/np.pi), -15, 15)
+
             # If there's a lack of navigable terrain pixels then go to 'stop' mode
             if len(Rover.nav_dists) < stop_thresh:
                 # Set mode to "stop" and hit the brakes!
@@ -73,8 +54,7 @@ def decision_step(Rover):
                 Rover.mode = 'stop'
                 Rover.debug = 'stopping'
 
-
-        # If we're already in "stop" mode then make different decisions
+        # if the rover mode is stop, then execute the following code
         elif Rover.mode == 'stop':
             # If we're in stop mode but still moving keep braking
             if Rover.vel > 0.2:
@@ -85,11 +65,6 @@ def decision_step(Rover):
             # If we're not moving (vel < 0.2) then do something else
             elif Rover.vel <= 0.2:
                 # if the rover has navigation but is not moving and trying to throttle
-                if len(Rover.nav_angles) >= 0 and Rover.vel <= 0.1:
-                    # if the rover is see nav terrain but not moving reverse the rover.
-                    Rover.throttle = -1 * Rover.throttle_set
-                    # maybe need to add steer the inverse of the nav angles
-                    Rover.debug = 'rover stuck'
 
                 # Now we're stopped and we have vision data to see if there's a path forward
                 if len(Rover.nav_angles) < Rover.go_forward:
@@ -100,14 +75,6 @@ def decision_step(Rover):
                     Rover.debug = 'rover turning'
 
                 # If we're stopped but see sufficient navigable terrain in front then go!
-                if len(Rover.nav_angles) >= Rover.go_forward and Rover.vel == 0 and Rover.throttle > 0:
-                    # reverse the rover.
-                    Rover.throttle = -1*Rover.throttle_set
-                    mean_angle = np.mean(Rover.nav_angles * 180 / np.pi)
-                    # turn away from the navigable terrain pixels
-                    Rover.steer = np.clip(-1*mean_angle, -15, 15)
-                    Rover.debug = 'nav > threshold, vel = 0, throttle +'
-
                 if len(Rover.nav_angles) >= Rover.go_forward:
 
                     # Set throttle back to stored value
@@ -115,8 +82,11 @@ def decision_step(Rover):
                     # Release the brake
                     Rover.brake = 0
 
+                    # calculate the mean angle of the navigable pixels in the rovers camera image
                     mean_angle = np.mean(Rover.nav_angles * 180 / np.pi)
                     nav_angle = mean_angle
+                    # steer the rover to theta degrees counter clodwise of the mean angle
+                    # this forces the rover to corrective steer to the left, forcing left wall follow.
                     Rover.steer = np.clip(nav_angle + theta, -15, 15)
 
                     Rover.mode = 'forward'
@@ -129,7 +99,6 @@ def decision_step(Rover):
                 Rover.steer = 0
                 Rover.mode = 'forward'
                 Rover.debug = 'unstuck'
-
 
     # Just to make the rover do something
     # even if no modifications have been made to the code
